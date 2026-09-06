@@ -92,6 +92,87 @@ def top_level_read_only(schema):
             if pointer.startswith(prefix) and "/" not in pointer[len(prefix):]}
 
 
+def policy_object(properties, description, required=()):
+    result = {"type": "object", "properties": properties,
+              "additionalProperties": False, "description": description}
+    if required:
+        result["required"] = list(required)
+    return result
+
+
+def resource_policies(type_name):
+    # Resource provider schemas describe Properties, not template attributes.
+    # Sources: AWS TemplateReference/aws-attribute-{creationpolicy,updatepolicy}.html
+    boolean = {"type": "boolean"}
+    integer = {"type": "integer"}
+    string = {"type": "string"}
+    percentage = {"type": "integer", "minimum": 0, "maximum": 100}
+    signal = policy_object({
+        "Count": {"type": "integer", "minimum": 1,
+                  "description": "Number of success signals required (default: 1)."},
+        "Timeout": {"type": "string",
+                    "description": "Signal timeout as an ISO 8601 duration, up to PT12H (default: PT5M)."},
+    }, "Wait for resource success signals before completing creation.")
+    creation, update = {}, {}
+    if type_name in ("AWS::EC2::Instance", "AWS::CloudFormation::WaitCondition",
+                     "AWS::AutoScaling::AutoScalingGroup"):
+        creation["ResourceSignal"] = signal
+    if type_name == "AWS::AppStream::Fleet":
+        creation["StartFleet"] = boolean
+        update = {"StopBeforeUpdate": boolean, "StartAfterUpdate": boolean}
+    if type_name == "AWS::AutoScaling::AutoScalingGroup":
+        creation["AutoScalingCreationPolicy"] = policy_object({
+            "MinSuccessfulInstancesPercent": percentage,
+        }, "Percentage of instances that must signal successful creation.")
+        update = {
+            "AutoScalingReplacingUpdate": policy_object({"WillReplace": boolean},
+                "Replace the Auto Scaling group and its instances."),
+            "AutoScalingRollingUpdate": policy_object({
+                "MaxBatchSize": {"type": "integer", "minimum": 1, "maximum": 100},
+                "MinInstancesInService": {"type": "integer", "minimum": 0},
+                "MinSuccessfulInstancesPercent": percentage,
+                "PauseTime": {"type": "string", "description": "Pause duration in ISO 8601 format, up to PT1H."},
+                "SuspendProcesses": {"type": "array", "items": string},
+                "WaitOnResourceSignals": boolean,
+            }, "Update instances in batches."),
+            "AutoScalingScheduledAction": policy_object({
+                "IgnoreUnmodifiedGroupSizeProperties": boolean,
+            }, "Preserve group sizes changed by scheduled actions."),
+            "AutoScalingInstanceRefresh": policy_object({
+                "Strategy": {"type": "string", "enum": ["Rolling", "ReplaceRootVolume"]},
+                "Preferences": policy_object({
+                    "AlarmSpecification": policy_object({
+                        "Alarms": {"type": "array", "items": string, "maxItems": 10},
+                    }, "CloudWatch alarms to monitor during the refresh."),
+                    "BakeTime": {"type": "integer", "minimum": 0, "maximum": 172800},
+                    "CheckpointDelay": {"type": "integer", "minimum": 0, "maximum": 172800},
+                    "CheckpointPercentages": {"type": "array", "items": percentage},
+                    "InstanceWarmup": integer,
+                    "MaxHealthyPercentage": {"type": "integer", "minimum": 100, "maximum": 200},
+                    "MinHealthyPercentage": percentage,
+                    "ScaleInProtectedInstances": {"type": "string", "enum": ["Refresh", "Ignore", "Wait"]},
+                    "SkipMatching": boolean,
+                    "StandbyInstances": {"type": "string", "enum": ["Terminate", "Ignore", "Wait"]},
+                }, "Instance refresh preferences."),
+            }, "Refresh instances using Auto Scaling.", required=("Strategy",)),
+        }
+    if type_name == "AWS::ElastiCache::ReplicationGroup":
+        update["UseOnlineResharding"] = boolean
+    if type_name in ("AWS::OpenSearchService::Domain", "AWS::Elasticsearch::Domain"):
+        update["EnableVersionUpgrade"] = boolean
+    if type_name == "AWS::Lambda::Alias":
+        update["CodeDeployLambdaAliasUpdate"] = policy_object({
+            "ApplicationName": string, "DeploymentGroupName": string,
+            "BeforeAllowTrafficHook": string, "AfterAllowTrafficHook": string,
+        }, "Deploy alias updates through CodeDeploy.",
+            required=("ApplicationName", "DeploymentGroupName"))
+    return {name: relax(policy_object(properties, description))
+            for name, properties, description in (
+                ("CreationPolicy", creation, "Control resource creation and success signals."),
+                ("UpdatePolicy", update, "Control how CloudFormation updates this resource."),
+            ) if properties}
+
+
 def build_resource(schema):
     type_name = schema["typeName"]
     read_only = top_level_read_only(schema)
@@ -124,8 +205,7 @@ def build_resource(schema):
             "DependsOn": {"anyOf": [{"type": "string"}, {"type": "array", "items": {"type": "string"}}]},
             "DeletionPolicy": {"type": "string", "enum": DELETION_POLICIES},
             "UpdateReplacePolicy": {"type": "string", "enum": DELETION_POLICIES},
-            "CreationPolicy": {"type": "object"},
-            "UpdatePolicy": {"type": "object"},
+            **resource_policies(type_name),
             "Metadata": {"type": "object"},
         },
     }
