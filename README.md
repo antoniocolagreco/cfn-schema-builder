@@ -24,7 +24,13 @@ The output is `cfn-template.schema.json` (~8 MB, 1065 resource types plus custom
   See the [AWS custom resource reference](https://docs.aws.amazon.com/AWSCloudFormation/latest/TemplateReference/aws-resource-cloudformation-customresource.html).
 - Prefixes each resource's `definitions` with its `typeName`, so names don't collide in the merged schema.
 - Resolves internal `resource-schema.json#/properties/...` references by inlining the target property, with cycle protection.
-- Widens every scalar type to `anyOf: [scalar, array, object]`, so intrinsic functions (`Ref`, `Fn::GetAtt`, `Fn::Sub`, ...) and their YAML shorthands aren't reported as errors.
+- Widens every scalar type to `anyOf: [scalar, array, object]` to accept intrinsic functions (`Ref`, `Fn::GetAtt`, `Fn::Sub`, ...) represented as objects or arrays.
+- Removes string `pattern` constraints from resource properties and nested definitions
+  so scalar YAML intrinsics such as `!GetAtt S3CopyRole.Arn` do not fail literal ARN
+  validation. The editor validates these tagged values as plain strings; this also
+  disables format checks for literal strings. Other constraints, including enums
+  and lengths, remain and may still reject some scalar intrinsic arguments.
+  Resource type names and logical ID patterns remain validated.
 
 ## Resource policies
 

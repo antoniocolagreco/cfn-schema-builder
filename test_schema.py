@@ -26,6 +26,17 @@ class TemplateSchemaTests(unittest.TestCase):
     def policy(self, resource, name):
         return self.schema["definitions"][resource]["properties"][name]
 
+    def test_lambda_role_intrinsic_scalar_argument(self):
+        role = self.policy("AWS::Lambda::Function", "Properties")["properties"]["Role"]
+        validator = Draft7Validator(role)
+        # The YAML language server passes the scalar argument without its tag.
+        for value in ("S3CopyRole.Arn", "${S3CopyRole.Arn}",
+                      "arn:aws:iam::123456789012:role/CopyRole",
+                      {"Fn::GetAtt": ["S3CopyRole", "Arn"]}):
+            with self.subTest(value=value):
+                self.assertTrue(validator.is_valid(value))
+        self.assertFalse(validator.is_valid(123))
+
     def test_custom_resources(self):
         validator = Draft7Validator(self.schema)
         for resource_type in ("Custom::S3Objects", "Custom::Name_@-123",

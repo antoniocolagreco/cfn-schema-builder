@@ -82,6 +82,10 @@ def relax(node):
     node_type = node.get("type")
     if not (isinstance(node_type, str) and node_type in SCALARS):
         return node
+    if node_type == "string":
+        # YAML language servers validate scalar custom tags such as !GetAtt
+        # as plain strings. Their arguments cannot satisfy literal ARN patterns.
+        node.pop("pattern", None)
     carried = {key: node.pop(key) for key in CARRIED if key in node}
     return {**carried, "anyOf": [node, {"type": "array"}, {"type": "object"}]}
 
