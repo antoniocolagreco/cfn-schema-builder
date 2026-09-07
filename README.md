@@ -10,7 +10,7 @@ Put the JSON files downloaded from AWS in `download/` (one per resource type, e.
 python3 build-schema.py
 ```
 
-The output is `cfn-template.schema.json` (~8 MB, 1065 resources), usable for template autocompletion and validation in the editor.
+The output is `cfn-template.schema.json` (~8 MB, 1065 resource types plus custom resources), usable for template autocompletion and validation in the editor.
 
 ## What the script does
 
@@ -18,6 +18,10 @@ The output is `cfn-template.schema.json` (~8 MB, 1065 resources), usable for tem
 - For each resource provider it generates a definition with `Type`, `Properties` and the `Condition`, `DependsOn`, `DeletionPolicy`, `UpdateReplacePolicy`, `CreationPolicy`, `UpdatePolicy`, `Metadata` attributes.
 - Drops the properties listed in `readOnlyProperties`, since they cannot be written in a template.
 - Makes `Properties` required only when the source schema declares required properties.
+- Supports `Custom::<name>` resource types (for example `Custom::S3Objects`) and
+  `AWS::CloudFormation::CustomResource`, requiring `ServiceToken` and allowing
+  provider-defined fields in `Properties`. Standard resource attributes remain validated.
+  See the [AWS custom resource reference](https://docs.aws.amazon.com/AWSCloudFormation/latest/TemplateReference/aws-resource-cloudformation-customresource.html).
 - Prefixes each resource's `definitions` with its `typeName`, so names don't collide in the merged schema.
 - Resolves internal `resource-schema.json#/properties/...` references by inlining the target property, with cycle protection.
 - Widens every scalar type to `anyOf: [scalar, array, object]`, so intrinsic functions (`Ref`, `Fn::GetAtt`, `Fn::Sub`, ...) and their YAML shorthands aren't reported as errors.
@@ -44,4 +48,4 @@ python3 -m unittest -v
 ```
 
 Tests rebuild in a temporary directory, verify that the committed schema is current,
-check draft-07 validity, and cover policy completion keys and validation.
+check draft-07 validity, and cover custom resources and policy completion keys and validation.

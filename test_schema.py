@@ -12,7 +12,7 @@ from jsonschema import Draft7Validator
 ROOT = Path(__file__).parent
 
 
-class PolicySchemaTests(unittest.TestCase):
+class TemplateSchemaTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         with tempfile.TemporaryDirectory() as directory:
@@ -25,6 +25,43 @@ class PolicySchemaTests(unittest.TestCase):
 
     def policy(self, resource, name):
         return self.schema["definitions"][resource]["properties"][name]
+
+    def test_custom_resources(self):
+        validator = Draft7Validator(self.schema)
+        for resource_type in ("Custom::S3Objects", "Custom::Name_@-123",
+                              "Custom::" + "A" * 52, "AWS::CloudFormation::CustomResource"):
+            for token in ("arn:aws:lambda:eu-west-1:123456789012:function:provider",
+                          {"Fn::GetAtt": ["Provider", "Arn"]}):
+                resource = {
+                    "Type": resource_type,
+                    "Properties": {"ServiceToken": token, "ServiceTimeout": 60,
+                                   "Bucket": {"Ref": "Bucket"},
+                                   "Objects": [{"Key": "index.html", "Body": "hello"}],
+                                   "Enabled": True},
+                    "Condition": "CreateObjects", "DependsOn": ["Bucket"],
+                    "DeletionPolicy": "Retain", "Metadata": {"Owner": "test"},
+                }
+                with self.subTest(resource_type=resource_type, token=token):
+                    self.assertTrue(validator.is_valid({"Resources": {"Objects": resource}}))
+
+    def test_custom_resource_constraints(self):
+        validator = Draft7Validator(self.schema)
+        invalid = [
+            {"Type": name, "Properties": {"ServiceToken": "provider"}}
+            for name in ("Custom::", "Custom::Bad.Name", "Custom::Bad::Name",
+                         "Custom::" + "A" * 53, "AWS::S3::Buckett")
+        ]
+        for name in ("Custom::S3Objects", "AWS::CloudFormation::CustomResource"):
+            invalid.extend([
+                {"Type": name},
+                {"Type": name, "Properties": {"Bucket": "example"}},
+                {"Type": name, "Properties": "invalid"},
+                {"Type": name, "Properties": {"ServiceToken": "provider"}, "Bucket": "example"},
+            ])
+        invalid.append({"Type": "AWS::S3::Bucket", "Properties": {"CustomProperty": True}})
+        for resource in invalid:
+            with self.subTest(resource=resource):
+                self.assertFalse(validator.is_valid({"Resources": {"Objects": resource}}))
 
     def test_generated_schema_is_current_and_valid(self):
         self.assertEqual(self.generated, (ROOT / "cfn-template.schema.json").read_bytes())

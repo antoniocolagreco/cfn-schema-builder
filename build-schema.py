@@ -182,6 +182,9 @@ def build_resource(schema):
 
     body = {"type": "object", "properties": properties,
             "additionalProperties": schema.get("additionalProperties", False)}
+    if type_name == "AWS::CloudFormation::CustomResource":
+        # Custom resource providers define their own input properties.
+        body["additionalProperties"] = True
     for key in SCHEMA_KEYS:
         if key in schema and key not in ("properties", "definitions", "additionalProperties"):
             body[key] = schema[key]
@@ -225,6 +228,15 @@ for path in sorted(SOURCE.glob("*.json")):
     definitions[schema["typeName"]] = resource
     definitions.update(nested)
     resource_refs.append({"$ref": f"#/definitions/{schema['typeName']}"})
+    if schema["typeName"] == "AWS::CloudFormation::CustomResource":
+        custom, _ = build_resource(schema)
+        custom["properties"]["Type"] = {
+            "type": "string", "pattern": "^Custom::[a-zA-Z0-9_@-]+$",
+            "maxLength": 60,
+            "description": "Custom resource type name, for example Custom::S3Objects.",
+        }
+        definitions["CustomResource"] = custom
+        resource_refs.append({"$ref": "#/definitions/CustomResource"})
 
 template = {
     "$schema": "http://json-schema.org/draft-07/schema#",
